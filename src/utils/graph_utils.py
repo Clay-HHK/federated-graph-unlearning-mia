@@ -175,6 +175,69 @@ def select_control_node(
     return control_idx
 
 
+def select_control_node_degree_matched(
+    edge_index: torch.Tensor,
+    num_nodes: int,
+    hub_idx: int,
+    target_idx: int,
+    seed: int = None,
+    degree_tolerance: int = 3,
+) -> int:
+    """
+    Select a control node with similar degree to the hub node.
+
+    Finds a non-neighbor of both hub and target whose degree is within
+    [hub_degree - tolerance, hub_degree + tolerance]. Widens tolerance
+    iteratively if no candidates are found.
+
+    Args:
+        edge_index: Graph connectivity [2, num_edges]
+        num_nodes: Total number of nodes
+        hub_idx: Hub node index (degree reference)
+        target_idx: Target node index
+        seed: Random seed for selection
+        degree_tolerance: Initial tolerance for degree matching
+
+    Returns:
+        Control node index with matched degree
+    """
+    degrees = get_node_degrees(edge_index, num_nodes)
+    hub_degree = degrees[hub_idx].item()
+
+    hub_neighbors = get_neighbors(edge_index, hub_idx)
+    target_neighbors = get_neighbors(edge_index, target_idx)
+
+    excluded = set([hub_idx, target_idx])
+    excluded.update(hub_neighbors.tolist())
+    excluded.update(target_neighbors.tolist())
+
+    all_nodes = set(range(num_nodes))
+    base_candidates = list(all_nodes - excluded)
+
+    if len(base_candidates) == 0:
+        raise ValueError("No valid control nodes available")
+
+    if seed is not None:
+        rng = np.random.RandomState(seed)
+    else:
+        rng = np.random
+
+    # Try increasingly wider degree tolerance
+    tolerance = degree_tolerance
+    for _ in range(10):
+        matched = [
+            c for c in base_candidates
+            if abs(degrees[c].item() - hub_degree) <= tolerance
+        ]
+        if matched:
+            return int(rng.choice(matched))
+        tolerance *= 2
+
+    # Fallback: pick the candidate with closest degree
+    closest = min(base_candidates, key=lambda c: abs(degrees[c].item() - hub_degree))
+    return closest
+
+
 def remove_node_edges(data: Data, node_idx: int) -> Data:
     """
     Remove all edges connected to a node (for unlearning).

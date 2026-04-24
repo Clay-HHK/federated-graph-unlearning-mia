@@ -85,6 +85,57 @@ class FederatedClient:
 
         return loss_val
 
+    def train_local_dp(
+        self,
+        dp_config: 'DPConfig',
+        epochs: int = 5,
+        lr: float = 0.01,
+        weight_decay: float = 5e-4,
+    ) -> float:
+        """
+        Local training with DP-SGD (gradient clipping + Gaussian noise).
+
+        Args:
+            dp_config: DPConfig with epsilon, delta, max_grad_norm
+            epochs: Number of local training epochs
+            lr: Learning rate
+            weight_decay: Weight decay for Adam optimizer
+
+        Returns:
+            Final training loss
+        """
+        from .dp_sgd import clip_gradients, add_gaussian_noise
+
+        data = self.subgraph.data.to(self.device)
+        self.model.train()
+
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=lr, weight_decay=weight_decay
+        )
+
+        loss_val = 0.0
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            out = self.model(data.x, data.edge_index)
+
+            if hasattr(data, 'train_mask') and data.train_mask is not None and data.train_mask.sum() > 0:
+                mask = data.train_mask
+            else:
+                mask = torch.ones(data.num_nodes, dtype=torch.bool, device=self.device)
+
+            loss = F.cross_entropy(out[mask], data.y[mask])
+            loss.backward()
+
+            clip_gradients(self.model, dp_config.max_grad_norm)
+            add_gaussian_noise(
+                self.model, dp_config.noise_multiplier, dp_config.max_grad_norm
+            )
+
+            optimizer.step()
+            loss_val = loss.item()
+
+        return loss_val
+
     def upload_model(self) -> OrderedDict:
         """Return model state_dict for server aggregation."""
         return copy.deepcopy(self.model.state_dict())

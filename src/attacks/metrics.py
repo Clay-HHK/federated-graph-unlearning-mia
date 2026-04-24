@@ -57,6 +57,42 @@ def compute_attack_metrics(
     }
 
 
+def compute_attack_metrics_full(
+    y_true: List[int],
+    y_scores: List[float],
+) -> Dict[str, object]:
+    """
+    Compute attack metrics AND return full ROC curve data.
+
+    Extends compute_attack_metrics with raw FPR/TPR arrays for
+    ROC curve plotting and multi-threshold analysis.
+
+    Args:
+        y_true: True labels (1 for member/hub, 0 for non-member/control)
+        y_scores: Attack scores (higher = more likely member)
+
+    Returns:
+        Dictionary with scalar metrics plus 'fpr', 'tpr', 'roc_thresholds' arrays
+    """
+    base_metrics = compute_attack_metrics(y_true, y_scores)
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+
+    # Detection rates at multiple thresholds
+    auc_val = base_metrics['auc']
+    detection_rates = {
+        f'det_rate_{t}': int(auc_val > t)
+        for t in [0.55, 0.60, 0.65, 0.70]
+    }
+
+    return {
+        **base_metrics,
+        'fpr': fpr.tolist(),
+        'tpr': tpr.tolist(),
+        'roc_thresholds': thresholds.tolist(),
+        **detection_rates,
+    }
+
+
 def compute_signal_to_noise(
     positive_scores: List[float],
     negative_scores: List[float]
